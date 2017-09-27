@@ -7,17 +7,17 @@
     gui, % atom of the GUI process
     nick, % nick/username of the client
     server, % atom of the chat server
-	channels % Channels that the client is a member of
+    channels % Channels that the client is a member of
 }).
 
 % Return an initial state record. This is called from GUI.
 % Do not change the signature of this function.
 initial_state(Nick, GUIAtom, ServerAtom) ->
     #client_st{
-        gui = GUIAtom,
-        nick = Nick,
-        server = ServerAtom,
-		channels = []
+    gui = GUIAtom,
+    nick = Nick,
+    server = ServerAtom,
+    channels = []
     }.
 
 % handle/2 handles each kind of request from GUI
@@ -30,35 +30,39 @@ initial_state(Nick, GUIAtom, ServerAtom) ->
 
 % Join channel
 handle(St, {join, Channel}) ->
-    % TODO: Implement this function
-	Data = {join,self(), Channel},
-	Serv = St#client_st.server,
-	%% In some tests Serv ceased to be an Atom and was a PiD, thus needed this here.
-	if is_atom(Serv) == true ->
-		Registered = whereis(Serv),
-		if Registered == undefined ->
-			Reply = server_not_reached;
-		true ->
-			Reply = genserver:request(Serv, Data)
-		end;
-	true ->
-		Reply = genserver:request(Serv, Data)
-	end,
-    case Reply of 
+    Serv = St#client_st.server,
+    Nickname = St#client_st.nick,
+    Data = {join,self(),Nickname, Channel},
+    
+    %% In some tests Serv ceased to be an Atom and was a PiD, thus needed this here.
+    if is_atom(Serv) == true ->
+        % Check to see if server atom is registered, if not means server is unavailable
+        Registered = whereis(Serv),
         
+        if Registered == undefined ->
+            Reply = server_not_reached;
+        true ->
+            Reply = genserver:request(Serv, Data)
+        end;
+        
+    true ->
+        Reply = genserver:request(Serv, Data)
+    end,
+    case Reply of
+    
         ok ->  %if you get an ok reply then add the new channel to the list of channels
-			Cha = [Channel|St#client_st.channels],
-			NewSt = St#client_st{channels = Cha} ,		
- 	    	Response = ok;
+            Cha = [Channel|St#client_st.channels],
+            NewSt = St#client_st{channels = Cha} ,		
+             Response = ok;
         user_already_joined ->
-        	%if it wants to join a channel which it already joined then send error
-        	Response = {error,user_already_joined,"user_already_joined"},
-			NewSt = St;
-		server_not_reached ->
-			Response = {error,server_not_reached,"Channel/server unavailable on send msg."},
-			NewSt = St;
+            %if it wants to join a channel which it already joined then send error
+            Response = {error,user_already_joined,"user_already_joined"},
+            NewSt = St;
+        server_not_reached ->
+            Response = {error,server_not_reached,"Channel/server unavailable on send msg."},
+            NewSt = St;
         _->  %If anything other than recieved then it shows an error which is not thought of so send error
-			NewSt = St,
+            NewSt = St,
             Response = error
         end, 
 
@@ -75,16 +79,16 @@ handle(St, {leave, Channel}) ->
 
         ok -> 
             %if it recieves okay then delete the chanel from the list of channels 
-			Cha = lists:delete(Channel , St#client_st.channels),
-			NewSt = St#client_st{channels = Cha},
+            Cha = lists:delete(Channel , St#client_st.channels),
+            NewSt = St#client_st{channels = Cha},
             Response = ok;
         user_not_joined -> 
             %if user hasn't joined then reply error
-			NewSt = St,
+            NewSt = St,
             Response = {error,user_not_joined,"user_not_joined"};
         _ -> 
             %If anything other than recieved then it shows an error which is not thought of so send error
-			NewSt = St,
+            NewSt = St,
             Response = error
     end,
                             
@@ -92,19 +96,19 @@ handle(St, {leave, Channel}) ->
 
 % Sending message (from GUI, to channel)
 handle(St, {message_send, Channel, Msg}) ->
-	Pid = self(),
-	Ismemb = lists:member(Channel, St#client_st.channels),
-	if Ismemb =:= true ->
-		try spawn(fun() -> genserver:request(list_to_atom(Channel), {send_message,Channel, St#client_st.nick, Msg, Pid}) end) of
-			 _ -> 
-				{reply, ok, St}
-		catch
-			_ -> {reply, {error, server_not_reached, "Channel/server unavailible on send msg."}, St}
-		end;
-	true ->
-		{reply,{error,user_not_joined,"user_not_joined"}, St}
+    Pid = self(),
+    Ismemb = lists:member(Channel, St#client_st.channels),
+    
+    if Ismemb =:= true ->
+        try spawn(fun() -> genserver:request(list_to_atom(Channel), {send_message,Channel, St#client_st.nick, Msg, Pid}) end) of
+             _ -> 
+                {reply, ok, St}
+        catch
+            _ -> {reply, {error, server_not_reached, "Channel/server unavailible on send msg."}, St}
+        end;
+    true ->
+        {reply,{error,user_not_joined,"user_not_joined"}, St}
 end;
-    %{reply, {error, not_implemented, "message sending not implemented"}, St} ;
 
 % ---------------------------------------------------------------------------
 % The cases below do not need to be changed...
@@ -114,9 +118,18 @@ end;
 handle(St, whoami) ->
     {reply, St#client_st.nick, St} ;
 
-% Change nick (no check, local only)
+% Change nick / Check for duplicate is implemented
 handle(St, {nick, NewNick}) ->
-    {reply, ok, St#client_st{nick = NewNick}} ;
+    Server =St#client_st.server,
+    OldNick = St#client_st.nick,
+    Data ={nick, OldNick, NewNick},
+    X = genserver:request(Server, Data),
+    
+    if X =:= ok ->
+        {reply, ok, St#client_st{nick = NewNick}} ;
+    true ->
+        {reply, {error, nick_taken, "nick_is_taken"}, St}
+    end;
 
 % Incoming message (from channel, to GUI)
 handle(St = #client_st{gui = GUI}, {message_receive, Channel, Nick, Msg}) ->
