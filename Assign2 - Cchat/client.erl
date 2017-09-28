@@ -59,7 +59,7 @@ handle(St, {join, Channel}) ->
             Response = {error,user_already_joined,"user_already_joined"},
             NewSt = St;
         server_not_reached ->
-            Response = {error,server_not_reached,"Channel/server unavailable on send msg."},
+            Response = {error,server_not_reached,"Server unavailable on send msg."},
             NewSt = St;
         _->  %If anything other than recieved then it shows an error which is not thought of so send error
             NewSt = St,
@@ -104,7 +104,7 @@ handle(St, {message_send, Channel, Msg}) ->
              _ -> 
                 {reply, ok, St}
         catch
-            _ -> {reply, {error, server_not_reached, "Channel/server unavailible on send msg."}, St}
+            _ -> {reply, {error, server_not_reached, "Channel unavailible on send msg."}, St}
         end;
     true ->
         {reply,{error,user_not_joined,"user_not_joined"}, St}
@@ -124,9 +124,9 @@ handle(St, {nick, NewNick}) ->
     OldNick = St#client_st.nick,
     Data ={nick, OldNick, NewNick},
     X = genserver:request(Server, Data),
-    
     if X =:= ok ->
-        {reply, ok, St#client_st{nick = NewNick}} ;
+	NewST = St#client_st{nick = NewNick},
+        {reply, ok, NewST} ;
     true ->
         {reply, {error, nick_taken, "nick_is_taken"}, St}
     end;
