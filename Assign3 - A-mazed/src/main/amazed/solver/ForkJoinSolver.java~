@@ -5,13 +5,18 @@ import amazed.maze.Maze;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.Arrays;
 import java.util.AbstractMap;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.Collections;
 import java.util.LinkedList;
+import java.util.Stack;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.BlockingDeque;
+import java.util.LinkedHashSet;
 
 
 /**
@@ -27,20 +32,26 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ForkJoinSolver
     extends SequentialSolver
 {
-    /**
+    // Thread Safe version of HashSet
+    protected ConcurrentSkipListSet<Integer> visitedd = new ConcurrentSkipListSet<Integer>();
+
+    // Thread Safe versin of HashMap
+    protected ConcurrentHashMap<Integer, Integer> predecessorz = new  ConcurrentHashMap<>();
+
+    // Starting position for the new threads
+    protected int forkStart = start;
+
+    // Fork Frontier
+    protected BlockingDeque<Integer> frontier = new LinkedBlockingDeque<Integer>();
+
+
+
+     /**
      * Creates a solver that searches in <code>maze</code> from the
      * start node to a goal.
      *
      * @param maze   the maze to be searched
      */
-    ForkJoinPool pool = new ForkJoinPool(4);
-    
-    // Thread Safe version of HashSet
-    protected ConcurrentSkipListSet<Integer> visited = new ConcurrentSkipListSet<Integer>();
-
-    // Thread Safe versin of HashMap
-    protected ConcurrentHashMap<Integer, Integer> predecessor = new  ConcurrentHashMap<>();
-
     public ForkJoinSolver(Maze maze)
     {
         super(maze);
@@ -63,6 +74,26 @@ public class ForkJoinSolver
         this.forkAfter = forkAfter;
     }
 
+  /**
+     * Creates a solver that searches in <code>maze</code> from the
+     * start node to a goal, forking after a given number of visited
+     * nodes.
+     *
+     * @param maze        the maze to be searched
+     * @param forkAfter   the number of steps (visited nodes) after
+     *                    which a parallel task is forked; if
+     *                    <code>forkAfter &lt;= 0</code> the solver never
+     *                    forks new tasks
+     * @param start       Starting point for fork
+     */
+
+    public ForkJoinSolver(Maze maze, int forkAfter, int start, ConcurrentSkipListSet<Integer> vis)
+    {
+        super(maze);
+        this.forkAfter = forkAfter;
+        this.forkStart = start;
+		this.visitedd = vis;
+    }
 
 
     /**
@@ -82,49 +113,97 @@ public class ForkJoinSolver
         return parallelDepthFirstSearch();
     }
 
-    private List<Integer> parallelDepthFirstSearch() {
-	// one player active on the maze at start
-	ForkJoinSolver[] forkArray;
-	int player = maze.newPlayer(start);
-	// start with start node
+  private List<Integer> parallelDepthFirstSearch() {
+      // Array that hold the threads, so we can join
+      ArrayList<ForkJoinSolver> forkArray = new  ArrayList<ForkJoinSolver>();
+      // List that will hold the result
+      List<Integer> result = null;
+      // id of the player
+      int player;
+      // Flag for root thread
+      boolean root = false;
+      
+      
+      // Checking if its a fork or the initial process
+      if (forkStart != start) {
+        player = maze.newPlayer(forkStart);
+        System.out.println("New fork at "+ forkStart);
+        frontier.push(forkStart);
+      }
+      else {
+        System.out.println("New player at "+ start);
+        
+        player = maze.newPlayer(start);
         frontier.push(start);
-	while (!frontier.empty()) {
-	    // get the new node to process
-	    int current = frontier.pop();
-	    if (maze.hasGoal(current)) {
-                // move player to goal
-                maze.move(player, current);
-                // search finished: reconstruct and return path
-                return pathFromTo(maze.start(), current);
-	    }
-	    // if current node has not been visited yet
-            if (!visited.contains(current)) {
-                // move player to current node
-                maze.move(player, current);
-                // mark node as visited
-                visited.add(current);
+        root = true;
+      }
 
-                //Get current neighbors
-		Integer[] neighbors =  toArray.maze.neighbors(current);
-		// Array that hold the threads, so we can join
-		forkArray = new ForkJoinSolver[neighbors.length-1];
-
-		 for (int i = 1; i < neighbors.length; i++) {
-                    // add nb to the nodes to be processed
-		    forkArray[i] = new ForkJoinSolver(maze, neighbors[i]);
-		    forkArray[i].fork();
-                    // if nb has not been already visited,
-                    // nb can be reached from current (i.e., current is nb's predecessor)
-                    if (!visited.contains(neighbors[i])) {
-                        predecessor.put(neighbors[i], current);
-                }
-            }
-	}
-    }
-    for (int i = 0; i < forkArray.length; i++) {
-	forkArray[i].join();
-    }
-        return null;
+      while (frontier.size() > 0) {
+          // get the new node to process
+          int current = frontier.removeFirst();
+          //System.out.println("POP!" +" from " +forkStart );
+          if (maze.hasGoal(current)) {
+              // move player to goal
+              maze.move(player, current);
+              System.out.println("FOUND IT!! @ " + current + "from "+forkStart ); 
+              // search finished: reconstruct and return path 
+              return pathFromTo(forkStart, current);
+          }
+          // if current node has not been visited yet
+          if (!visitedd.contains(current)) {
+              // move player to current node
+              maze.move(player, current);
+              // mark node as visited
+              visitedd.add(current);
+              //Get current neighbors
+              Set<Integer> neigh =  maze.neighbors(current);
+              // Remove visited nodes from neighbors, so we dont spawn more forks that we need
+              boolean a = neigh.removeAll(visitedd);
+              Integer[] neighbors =  neigh.toArray(new Integer[0]);
+              
+              if (neighbors.length > 1) {
+                  int size = forkArray.size();
+                  for (int i = 0; i < neighbors.length-1; i++) {
+                    // Create a new object for every neighbor, keep 1 for the current thread
+                    forkArray.add(new ForkJoinSolver(maze, forkAfter, neighbors[i], visitedd));
+                    predecessorz.put(neighbors[i], current);
+                    forkArray.get(size+i).fork();
+                  }
+                  //System.out.println("neighbors are  " + Arrays.toString(neighbors) +" from " +forkStart);
+                  frontier.addFirst(neighbors[neighbors.length-1]);
+                  predecessorz.put(neighbors[neighbors.length-1], current);
+              }
+              else {
+                  // If we have 1 neighbor then no need to spawn a new thread, we continue
+                  if (neighbors.length > 0 && !visitedd.contains(neighbors[0])) {
+                    frontier.addFirst(neighbors[0]);
+                    predecessorz.put(neighbors[0], current);
+                 }
+              }
+          }
+      }
+      // Joining Threads before returning value, we expect to find 1 goal
+      for (int i = 0; i < forkArray.size(); i++) {
+          List<Integer> temp = forkArray.get(i).join();
+          if (temp != null){
+            result = pathFromTo(forkStart, forkArray.get(i).forkStart);
+			if (result != null) {
+			result.addAll(temp);
+			result = new LinkedList<Integer>(new LinkedHashSet<Integer>(result));
+			System.out.println("Result is" +result);
+			}
+			return result;
+          }
+      }
+        // If root process, then you calculate the path from start to root, after joining all threads.
+        /*if (root){
+            Integer[] sollutions =  result.toArray(new Integer[0]);
+            //System.out.println("Goal is at: " + Arrays.toString(sollutions) + "from start" + start);
+            System.out.println("result is" + result);
+            return pathFromTo(start, sollutions[0]);
+            //return result;
+        }*/
+        return result;
 }
 
    /**
@@ -142,15 +221,18 @@ public class ForkJoinSolver
      */
     protected List<Integer> pathFromTo(int from, int to) {
         List<Integer> path = new LinkedList<>();
-        Integer current = to;
-        while (current != from) {
-            path.add(current);
-            current = predecessor.get(current);
-            if (current == null)
+        Integer curr = to;
+        while (curr != from) {
+            path.add(curr);
+            curr = predecessorz.get(curr);
+            if (curr == null) { /// Not having brackets in this if created a really wierd bug
+                System.out.println("OH no NULL");
                 return null;
+            }
         }
         path.add(from);
         Collections.reverse(path);
+		System.out.println("current is "+ to +"Path is: " + path);
         return path;
     }
 }

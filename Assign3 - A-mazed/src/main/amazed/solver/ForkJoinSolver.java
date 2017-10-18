@@ -16,6 +16,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.BlockingDeque;
+import java.util.LinkedHashSet;
 
 
 /**
@@ -32,16 +33,17 @@ public class ForkJoinSolver
     extends SequentialSolver
 {
     // Thread Safe version of HashSet
-    static protected ConcurrentSkipListSet<Integer> visitedd = new ConcurrentSkipListSet<Integer>();
+    protected ConcurrentSkipListSet<Integer> visitedd = new ConcurrentSkipListSet<Integer>();
 
     // Thread Safe versin of HashMap
-    static protected ConcurrentHashMap<Integer, Integer> predecessorz = new  ConcurrentHashMap<>();
+    protected ConcurrentHashMap<Integer, Integer> predecessorz = new  ConcurrentHashMap<>();
 
     // Starting position for the new threads
     protected int forkStart = start;
 
     // Fork Frontier
     protected BlockingDeque<Integer> frontier = new LinkedBlockingDeque<Integer>();
+
 
 
      /**
@@ -85,11 +87,12 @@ public class ForkJoinSolver
      * @param start       Starting point for fork
      */
 
-    public ForkJoinSolver(Maze maze, int forkAfter, int start)
+    public ForkJoinSolver(Maze maze, int forkAfter, int start, ConcurrentSkipListSet<Integer> vis)
     {
         super(maze);
         this.forkAfter = forkAfter;
         this.forkStart = start;
+		this.visitedd = vis;
     }
 
 
@@ -143,9 +146,8 @@ public class ForkJoinSolver
               // move player to goal
               maze.move(player, current);
               System.out.println("FOUND IT!! @ " + current + "from "+forkStart ); 
-              // search finished: reconstruct and return path
-              result = Arrays.asList(current);
-              break;
+              // search finished: reconstruct and return path 
+              return pathFromTo(forkStart, current);
           }
           // if current node has not been visited yet
           if (!visitedd.contains(current)) {
@@ -163,7 +165,7 @@ public class ForkJoinSolver
                   int size = forkArray.size();
                   for (int i = 0; i < neighbors.length-1; i++) {
                     // Create a new object for every neighbor, keep 1 for the current thread
-                    forkArray.add(new ForkJoinSolver(maze, forkAfter, neighbors[i]));
+                    forkArray.add(new ForkJoinSolver(maze, forkAfter, neighbors[i], visitedd));
                     predecessorz.put(neighbors[i], current);
                     forkArray.get(size+i).fork();
                   }
@@ -184,17 +186,23 @@ public class ForkJoinSolver
       for (int i = 0; i < forkArray.size(); i++) {
           List<Integer> temp = forkArray.get(i).join();
           if (temp != null){
-            result = temp;
+            result = pathFromTo(forkStart, forkArray.get(i).forkStart);
+			if (result != null) {
+			result.addAll(temp);
+			result = new LinkedList<Integer>(new LinkedHashSet<Integer>(result));
+			System.out.println("Result is" +result);
+			}
+			return result;
           }
       }
         // If root process, then you calculate the path from start to root, after joining all threads.
-        if (root){
+        /*if (root){
             Integer[] sollutions =  result.toArray(new Integer[0]);
             //System.out.println("Goal is at: " + Arrays.toString(sollutions) + "from start" + start);
             System.out.println("result is" + result);
             return pathFromTo(start, sollutions[0]);
             //return result;
-        }
+        }*/
         return result;
 }
 
@@ -216,7 +224,6 @@ public class ForkJoinSolver
         Integer curr = to;
         while (curr != from) {
             path.add(curr);
-            System.out.println("we start current =" + curr + "from"+ predecessorz.get(curr));
             curr = predecessorz.get(curr);
             if (curr == null) { /// Not having brackets in this if created a really wierd bug
                 System.out.println("OH no NULL");
@@ -225,6 +232,7 @@ public class ForkJoinSolver
         }
         path.add(from);
         Collections.reverse(path);
+		System.out.println("current is "+ to +"Path is: " + path);
         return path;
     }
 }
