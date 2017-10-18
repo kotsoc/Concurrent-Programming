@@ -35,15 +35,16 @@ public class ForkJoinSolver
     // Thread Safe version of HashSet
     protected ConcurrentSkipListSet<Integer> visitedd = new ConcurrentSkipListSet<Integer>();
 
-    // Thread Safe versin of HashMap
-    protected ConcurrentHashMap<Integer, Integer> predecessorz = new  ConcurrentHashMap<>();
+   /**
+   * Thread safe version of Hashmap
+   * Field can be static or not static, meaning not shareable
+   * Static provides better results, because we dont re-visit
+   *
+   **/
+    protected static ConcurrentHashMap<Integer, Integer> predecessorz = new  ConcurrentHashMap<>();
 
     // Starting position for the new threads
     protected int forkStart = start;
-
-    // Fork Frontier
-    protected BlockingDeque<Integer> frontier = new LinkedBlockingDeque<Integer>();
-
 
 
      /**
@@ -87,12 +88,11 @@ public class ForkJoinSolver
      * @param start       Starting point for fork
      */
 
-    public ForkJoinSolver(Maze maze, int forkAfter, int start, ConcurrentSkipListSet<Integer> vis)
-    {
+    public ForkJoinSolver(Maze maze, int forkAfter, int start, ConcurrentSkipListSet<Integer> vis) {
         super(maze);
         this.forkAfter = forkAfter;
         this.forkStart = start;
-		this.visitedd = vis;
+        this.visitedd = vis;
     }
 
 
@@ -140,12 +140,12 @@ public class ForkJoinSolver
 
       while (frontier.size() > 0) {
           // get the new node to process
-          int current = frontier.removeFirst();
+          int current = frontier.pop();
           //System.out.println("POP!" +" from " +forkStart );
           if (maze.hasGoal(current)) {
               // move player to goal
               maze.move(player, current);
-              System.out.println("FOUND IT!! @ " + current + "from "+forkStart ); 
+              //System.out.println("FOUND IT!! @ " + current + "from "+forkStart ); 
               // search finished: reconstruct and return path 
               return pathFromTo(forkStart, current);
           }
@@ -170,13 +170,13 @@ public class ForkJoinSolver
                     forkArray.get(size+i).fork();
                   }
                   //System.out.println("neighbors are  " + Arrays.toString(neighbors) +" from " +forkStart);
-                  frontier.addFirst(neighbors[neighbors.length-1]);
+                  frontier.push(neighbors[neighbors.length-1]);
                   predecessorz.put(neighbors[neighbors.length-1], current);
               }
               else {
                   // If we have 1 neighbor then no need to spawn a new thread, we continue
                   if (neighbors.length > 0 && !visitedd.contains(neighbors[0])) {
-                    frontier.addFirst(neighbors[0]);
+                    frontier.push(neighbors[0]);
                     predecessorz.put(neighbors[0], current);
                  }
               }
@@ -186,24 +186,17 @@ public class ForkJoinSolver
       for (int i = 0; i < forkArray.size(); i++) {
           List<Integer> temp = forkArray.get(i).join();
           if (temp != null){
-            result = pathFromTo(forkStart, forkArray.get(i).forkStart);
-			if (result != null) {
-			result.addAll(temp);
-			result = new LinkedList<Integer>(new LinkedHashSet<Integer>(result));
-			System.out.println("Result is" +result);
-			}
-			return result;
+              result = pathFromTo(forkStart, forkArray.get(i).forkStart);
+              if (result != null) {
+                  result.addAll(temp);
+                  result = new LinkedList<Integer>(new LinkedHashSet<Integer>(result));
+                  //System.out.println("Result is" +result);
+                 
+                }
+              return result;
           }
       }
-        // If root process, then you calculate the path from start to root, after joining all threads.
-        /*if (root){
-            Integer[] sollutions =  result.toArray(new Integer[0]);
-            //System.out.println("Goal is at: " + Arrays.toString(sollutions) + "from start" + start);
-            System.out.println("result is" + result);
-            return pathFromTo(start, sollutions[0]);
-            //return result;
-        }*/
-        return result;
+      return result;
 }
 
    /**
