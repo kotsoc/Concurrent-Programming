@@ -150,11 +150,11 @@ public class ForkJoinSolver
               return pathFromTo(forkStart, current);
           }
           // if current node has not been visited yet
-          if (!visitedd.contains(current)) {
+          if (visitedd.add(current)) {
               // move player to current node
               maze.move(player, current);
               // mark node as visited
-              visitedd.add(current);
+              //visitedd.add(current);
               //Get current neighbors
               Set<Integer> neigh =  maze.neighbors(current);
               // Remove visited nodes from neighbors, so we dont spawn more forks that we need
